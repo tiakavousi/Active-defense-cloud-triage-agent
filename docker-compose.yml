@@ -1,0 +1,101 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "OLLAMA_HOST=http://ollama:11434 ollama pull ${OLLAMA_MODEL}"
+    restart: "no"
+
+  api:
+    build: ./services/api
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      ANOMALY_FLAG_THRESHOLD: ${ANOMALY_FLAG_THRESHOLD}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  log_generator:
+    build: ./services/log_generator
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      GEN_EVENTS_PER_SECOND: ${GEN_EVENTS_PER_SECOND}
+      GEN_NUM_USERS: ${GEN_NUM_USERS}
+      GEN_ANOMALY_RATE: ${GEN_ANOMALY_RATE}
+      GEN_WARMUP_SECONDS: ${GEN_WARMUP_SECONDS}
+      API_HOST: ${API_HOST}
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  agent:
+    build: ./services/agent
+    environment:
+      API_HOST: ${API_HOST}
+      OLLAMA_HOST: ${OLLAMA_HOST}
+      OLLAMA_MODEL: ${OLLAMA_MODEL}
+      AGENT_POLL_SECONDS: ${AGENT_POLL_SECONDS}
+      AGENT_MAX_TOOL_CALLS: ${AGENT_MAX_TOOL_CALLS}
+    depends_on:
+      api:
+        condition: service_started
+      ollama:
+        condition: service_healthy
+
+  ui:
+    build: ./services/ui
+    environment:
+      API_HOST: ${API_HOST}
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "8501:8501"
+
+volumes:
+  postgres_data:
+  ollama_data:

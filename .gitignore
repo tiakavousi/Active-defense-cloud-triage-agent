@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+.idea/
+.vscode/
+.DS_Store
+ollama_data/
+postgres_data/
